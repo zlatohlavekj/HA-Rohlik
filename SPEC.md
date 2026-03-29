@@ -132,95 +132,135 @@ custom_components/rohlik/
 
 ## 6. API Documentation
 
-> ⚠️ **PŘEDBĚŽNÁ SEKCE** – bude upřesněna po spuštění `test_api.py`
+> ✅ **OVĚŘENO** – endpointy potvrzeny spuštěním `test_api.py` (2026-03-29)
 >
-> Rohlík.cz nemá veřejně dokumentované API. Níže jsou odhadované endpointy
-> na základě reverse-engineeringu. Vše musí být ověřeno!
+> Rohlik.cz nemá veřejné API. Implementace vychází z reverse-engineeringu
+> a open-source projektu `dvejsada/HA-RohlikCZ`.
 
 ### Base URL
 ```
-https://www.rohlik.cz/api/v1
+https://www.rohlik.cz/services/frontend-service
 ```
 
-### Autentizace (odhad)
+### Autentizace
 ```
-POST /login
+POST /services/frontend-service/login
 Content-Type: application/json
 
 {
   "email": "user@example.com",
-  "password": "heslo"
+  "password": "heslo",
+  "name": ""
 }
 
-Response:
+Response 200:
 {
-  "token": "Bearer eyJ...",
-  "userId": 12345
-}
-```
-
-### Vyhledávání produktů (odhad)
-```
-GET /products/search?query=mleko&limit=10
-Authorization: Bearer {token}
-
-Response:
-{
-  "results": [
-    {
-      "id": 678901,
-      "name": "Olma Mléko plnotučné 3,5% 1l",
-      "price": 29.90,
-      "pricePerUnit": "29,90 Kč/l",
-      "inStock": true,
-      "imageUrl": "https://..."
+  "status": 200,
+  "data": {
+    "isAuthenticated": true,
+    "session": "PHPSESSION_VALUE",
+    "user": {
+      "id": 738427,
+      "email": "user@example.com",
+      "name": "Jméno Příjmení"
     },
-    ...
-  ]
+    "store": { "storeId": 8799 },
+    "address": { "id": 5518075, ... }
+  }
 }
 ```
 
-### Košík – zobrazení (odhad)
-```
-GET /cart
-Authorization: Bearer {token}
+**Autentizace probíhá výhradně přes session cookie `PHPSESSION`.**
+Žádný Bearer token. `requests.Session()` si cookie pamatuje automaticky.
 
-Response:
+### Vyhledávání produktů
+```
+GET /services/frontend-service/search-metadata
+  ?search=mléko
+  &offset=0
+  &limit=15
+  &companyId=1
+  &canCorrect=true
+
+Response 200:
 {
-  "items": [
-    {
-      "productId": 678901,
-      "name": "Olma Mléko plnotučné 3,5% 1l",
-      "quantity": 2,
-      "pricePerPiece": 29.90,
-      "totalPrice": 59.80
-    }
-  ],
-  "totalPrice": 59.80,
-  "itemCount": 1
+  "status": 200,
+  "data": {
+    "productList": [
+      {
+        "productId": 1406260,
+        "productName": "Miil Selské čerstvé plnotučné mléko 3,8 % tuku",
+        "price": {
+          "full": 24.9,
+          "currency": "Kč"
+        },
+        "textualAmount": "1 l",
+        "unit": "l",
+        "imgPath": "/images/grocery/products/1406260/...",
+        "sales": [
+          {
+            "type": "premium",
+            "price": { "full": 22.41, "currency": "Kč" }
+          }
+        ]
+      },
+      ...   // celkem limit=15 produktů
+    ]
+  }
 }
 ```
 
-### Košík – přidání položky (odhad)
+### Košík – zobrazení
 ```
-POST /cart/items
-Authorization: Bearer {token}
+GET /services/frontend-service/v2/cart
+
+Response 200:
+{
+  "status": 200,
+  "data": {
+    "cartId": 142691042,
+    "totalPrice": 459.50,
+    "totalSavings": 12.0,
+    "minimalOrderPrice": 749.0,
+    "submitConditionPassed": false,
+    "items": {
+      "1406260": {
+        "orderFieldId": "field_xxx",
+        "productName": "Miil Selské mléko 3,8%",
+        "quantity": 2,
+        "price": 24.9,
+        "primaryCategoryName": "Mléčné a chlazené"
+      }
+    }
+  }
+}
+```
+
+### Košík – přidání položky
+```
+POST /services/frontend-service/v2/cart
 Content-Type: application/json
 
 {
-  "productId": 678901,
-  "quantity": 1
+  "actionId": null,
+  "productId": 1406260,
+  "quantity": 1,
+  "recipeId": null,
+  "source": "true:Shopping Lists"
 }
 
-Response:
-{
-  "success": true,
-  "cart": { ... }  // aktualizovaný košík
-}
+Response 200: aktualizovaný košík (stejná struktura jako GET /cart)
 ```
 
-> 📋 **TODO po `test_api.py`:** Doplnit skutečné endpointy, hlavičky,
-> formát session cookie vs. Bearer token, rate limiting.
+### Košík – odebrání položky
+```
+DELETE /services/frontend-service/v2/cart?orderFieldId={orderFieldId}
+```
+
+### Odhlášení
+```
+POST /services/frontend-service/logout
+```
 
 ---
 
@@ -550,8 +590,8 @@ Automatizované unit testy přijdou ve v2.0 (před HACS publikací).
 
 | # | Otázka | Status |
 |---|---|---|
-| Q1 | Skutečné Rohlík API endpointy a formát auth | ⏳ Řeší `test_api.py` |
-| Q2 | Session cookie nebo Bearer token? | ⏳ Řeší `test_api.py` |
+| Q1 | Skutečné Rohlík API endpointy a formát auth | ✅ Ověřeno – viz sekce 6 |
+| Q2 | Session cookie nebo Bearer token? | ✅ PHPSESSION cookie |
 | Q3 | Rate limiting Rohlík API | ⏳ Zjistit při testování |
 | Q4 | Jarvis: jaký TTS engine (Piper / cloud)? | ⏳ Rozhodnout při instalaci |
 | Q5 | Název HA service: `rohlik.add_to_cart` nebo `shopping.add_to_cart`? | 💡 Návrh: `rohlik.add_to_cart` |
