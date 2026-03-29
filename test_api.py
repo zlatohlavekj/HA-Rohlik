@@ -159,8 +159,12 @@ def test_prihlaseni_alternativy(session):
             info(f"  Status: {response.status_code}")
             if response.status_code == 200:
                 ok(f"Funguje! Endpoint: {url}")
-                ukazat_response(response)
-                return url  # Vrátíme funkční URL
+                ukazat_response(response, max_delka=2000)
+                # Zobrazit cookies pro debug
+                info(f"Cookies po přihlášení: {dict(session.cookies)}")
+                # Vrátíme "cookie_based" – autentizace probíhá přes PHPSESSION cookie,
+                # nikoliv přes Bearer token. Session objekt si cookies pamatuje automaticky.
+                return "cookie_based"
         except Exception as e:
             info(f"  Chyba: {e}")
 
@@ -180,11 +184,15 @@ def test_vyhledavani(session, token=None):
         session.headers.update({"Authorization": f"Bearer {token}"})
 
     # Zkusit různé search endpointy
+    # Priorita: services/frontend-service (tam funguje login) → api/v1 → api/v2
     endpointy = [
+        f"https://www.rohlik.cz/services/frontend-service/v2/products?productName={HLEDANY_PRODUKT}&limit=10",
+        f"https://www.rohlik.cz/services/frontend-service/v2/products?query={HLEDANY_PRODUKT}&limit=10",
+        f"https://www.rohlik.cz/services/frontend-service/v2/products/search?q={HLEDANY_PRODUKT}",
+        f"https://www.rohlik.cz/services/frontend-service/v1/products?name={HLEDANY_PRODUKT}",
         f"https://www.rohlik.cz/api/v1/products/search?query={HLEDANY_PRODUKT}",
         f"https://www.rohlik.cz/api/v1/search?q={HLEDANY_PRODUKT}",
         f"https://www.rohlik.cz/api/v2/products?search={HLEDANY_PRODUKT}",
-        f"https://www.rohlik.cz/services/frontend-service/v2/products?productName={HLEDANY_PRODUKT}",
     ]
 
     for url in endpointy:
@@ -230,9 +238,14 @@ def test_kosik(session, token=None):
     sekce("Zobrazení košíku")
 
     endpointy = [
+        # services/frontend-service (priorita – tam funguje login)
+        "https://www.rohlik.cz/services/frontend-service/v1/orders",
+        "https://www.rohlik.cz/services/frontend-service/v2/orders",
+        "https://www.rohlik.cz/services/frontend-service/v1/cart",
+        "https://www.rohlik.cz/services/frontend-service/v2/cart",
+        # api/ endpointy
         "https://www.rohlik.cz/api/v1/cart",
         "https://www.rohlik.cz/api/v2/cart",
-        "https://www.rohlik.cz/services/frontend-service/v1/cart",
     ]
 
     for url in endpointy:
