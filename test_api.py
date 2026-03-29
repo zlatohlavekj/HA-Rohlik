@@ -111,62 +111,49 @@ def test_prihlaseni(session):
 
 def test_vyhledavani(session, token=None):
     sekce(f"Vyhledavani: '{HLEDANY_PRODUKT}'")
+    info("Pouzivam cookie autentizaci (PHPSESSION)")
 
-    if token and token != "cookie_based":
-        session.headers.update({"Authorization": f"Bearer {token}"})
-    else:
-        info("Pouzivam cookie autentizaci")
+    # Spravny endpoint zjisteny z existujici HA integrace dvejsada/HA-RohlikCZ
+    url = "https://www.rohlik.cz/services/frontend-service/search-metadata"
+    params = {
+        "search": HLEDANY_PRODUKT,
+        "offset": 0,
+        "limit": 15,
+        "companyId": 1,
+        "canCorrect": "true",
+    }
 
-    # storeId ziskame z login response (8799 je hodnota z tveho uctu)
-    STORE_ID = 8799
+    info(f"Zkousim: GET {url}")
+    info(f"  Params: {params}")
+    try:
+        response = session.get(url, params=params, timeout=10)
+        info(f"  Status: {response.status_code}")
 
-    # Pouzivame params= misto string interpolace – requests automaticky URL-enkoduje
-    # napr. "mléko" → "ml%C3%A9ko" (spravne zpracuje diakritiku)
-    endpointy = [
-        # api/v1/products/search vratil 400 (endpoint existuje!) – zkusime s ruznyma parametrama
-        ("https://www.rohlik.cz/api/v1/products/search",
-            {"query": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
-        ("https://www.rohlik.cz/api/v1/products/search",
-            {"query": HLEDANY_PRODUKT, "limit": 10}),
-        ("https://www.rohlik.cz/api/v1/products/search",
-            {"name": HLEDANY_PRODUKT, "storeId": STORE_ID}),
-        # frontend-service varianty
-        ("https://www.rohlik.cz/services/frontend-service/v2/search",
-            {"query": HLEDANY_PRODUKT, "storeId": STORE_ID}),
-        ("https://www.rohlik.cz/services/frontend-service/v1/search",
-            {"query": HLEDANY_PRODUKT}),
-        ("https://www.rohlik.cz/services/frontend-service/v2/products",
-            {"productName": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
-        ("https://www.rohlik.cz/services/frontend-service/v2/products",
-            {"name": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
-    ]
+        if response.status_code in (400, 401, 403, 404):
+            info(f"  Odpoved {response.status_code}:")
+            ukazat_response(response, zkratit=True)
+            return None, []
 
-    for url, params in endpointy:
-        info(f"Zkousim: GET {url} params={params}")
-        try:
-            response = session.get(url, params=params, timeout=10)
-            info(f"  Status: {response.status_code}")
-            # Zobrazit telo i u 400/401/403 – server nam rekne co chybi
-            if response.status_code in (400, 401, 403):
-                info(f"  Odpoved {response.status_code} (co rika server):")
-                ukazat_response(response, zkratit=True)
-            if response.status_code == 200:
-                ok(f"Vyhledavani funguje! Endpoint: {url} params={params}")
-                ukazat_response(response, zkratit=True)
-                try:
-                    data = response.json()
-                    d = data.get("data") or data
-                    produkty = (d.get("results") or d.get("products") or
-                                d.get("items") or data.get("results") or [])
-                    if isinstance(produkty, list) and produkty:
-                        ok(f"Nalezeno {len(produkty)} produktu")
-                        info(f"Prvni produkt: {json.dumps(produkty[0], ensure_ascii=False)[:300]}")
-                        return url, produkty
-                except Exception as e:
-                    info(f"Chyba parsovani: {e}")
-                return url, []
-        except Exception as e:
-            info(f"  Chyba: {e}")
+        if response.status_code == 200:
+            ok(f"Vyhledavani funguje!")
+            ukazat_response(response, zkratit=True)
+            try:
+                data = response.json()
+                d = data.get("data") or data
+                # Spravna cesta k produktum: data.productList
+                produkty = d.get("productList") or d.get("products") or []
+                if isinstance(produkty, list) and produkty:
+                    ok(f"Nalezeno {len(produkty)} produktu")
+                    info(f"Prvni produkt: {json.dumps(produkty[0], ensure_ascii=False)[:400]}")
+                    return url, produkty
+                else:
+                    info(f"Odpoved 200 ale produkty nenalezeny. Klice v data: {list(d.keys()) if isinstance(d, dict) else type(d)}")
+            except Exception as e:
+                info(f"Chyba parsovani: {e}")
+            return url, []
+
+    except Exception as e:
+        info(f"  Chyba: {e}")
 
     chyba("Vyhledavani nefunguje")
     return None, []
@@ -208,26 +195,27 @@ def test_pridat_do_kosiku(session, produkt_id, cart_url):
     info("POZOR: Toto skutecne prida polozku do tveho kosiku!")
     time.sleep(2)
 
-    base = "https://www.rohlik.cz/services/frontend-service"
-    endpointy = [
-        f"{base}/v1/orders",
-        f"{base}/v2/orders",
-        f"{base}/v1/cart/items",
-        "https://www.rohlik.cz/api/v1/cart/items",
-    ]
-    payload = {"productId": produkt_id, "quantity": 1}
+    # Spravny endpoint a payload zjisteny z dvejsada/HA-RohlikCZ
+    url = "https://www.rohlik.cz/services/frontend-service/v2/cart"
+    payload = {
+        "actionId": None,
+        "productId": produkt_id,
+        "quantity": 1,
+        "recipeId": None,
+        "source": "true:Shopping Lists",
+    }
 
-    for url in endpointy:
-        info(f"Zkousim: POST {url}")
-        try:
-            response = session.post(url, json=payload, timeout=10)
-            info(f"  Status: {response.status_code}")
-            ukazat_response(response, zkratit=True)
-            if response.status_code in (200, 201):
-                ok("Pridani uspesne!")
-                return True
-        except Exception as e:
-            info(f"  Chyba: {e}")
+    info(f"POST {url}")
+    info(f"  Payload: {payload}")
+    try:
+        response = session.post(url, json=payload, timeout=10)
+        info(f"  Status: {response.status_code}")
+        ukazat_response(response, zkratit=True)
+        if response.status_code in (200, 201):
+            ok("Pridani uspesne!")
+            return True
+    except Exception as e:
+        info(f"  Chyba: {e}")
 
     chyba("Pridani do kosiku selhalo")
     return False
