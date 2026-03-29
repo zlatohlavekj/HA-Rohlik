@@ -1,0 +1,23 @@
+# Secrets & credentials
+.env
+secrets.yaml
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+
+# macOS
+.DS_Store
+
+# HA local config (never commit)
+config/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing artifacts
+.pytest_cache/
+htmlcov/
+.coverage
