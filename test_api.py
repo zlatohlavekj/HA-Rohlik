@@ -114,32 +114,44 @@ def test_vyhledavani(session, token=None):
 
     if token and token != "cookie_based":
         session.headers.update({"Authorization": f"Bearer {token}"})
-        info(f"Pouzivam Bearer token: {str(token)[:30]}...")
     else:
         info("Pouzivam cookie autentizaci")
 
-    info(f"Aktualni cookies: {dict(session.cookies)}")
+    # storeId ziskame z login response (8799 je hodnota z tveho uctu)
+    STORE_ID = 8799
 
+    # Pouzivame params= misto string interpolace – requests automaticky URL-enkoduje
+    # napr. "mléko" → "ml%C3%A9ko" (spravne zpracuje diakritiku)
     endpointy = [
-        f"https://www.rohlik.cz/services/frontend-service/v2/products?productName={HLEDANY_PRODUKT}&limit=10",
-        f"https://www.rohlik.cz/services/frontend-service/v2/products?query={HLEDANY_PRODUKT}&limit=10",
-        f"https://www.rohlik.cz/services/frontend-service/v1/products?name={HLEDANY_PRODUKT}",
-        f"https://www.rohlik.cz/services/frontend-service/v2/products/search?q={HLEDANY_PRODUKT}",
-        f"https://www.rohlik.cz/api/v1/products/search?query={HLEDANY_PRODUKT}",
-        f"https://www.rohlik.cz/api/v1/search?q={HLEDANY_PRODUKT}",
-        f"https://www.rohlik.cz/api/v2/products?search={HLEDANY_PRODUKT}",
+        # api/v1/products/search vratil 400 (endpoint existuje!) – zkusime s ruznyma parametrama
+        ("https://www.rohlik.cz/api/v1/products/search",
+            {"query": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
+        ("https://www.rohlik.cz/api/v1/products/search",
+            {"query": HLEDANY_PRODUKT, "limit": 10}),
+        ("https://www.rohlik.cz/api/v1/products/search",
+            {"name": HLEDANY_PRODUKT, "storeId": STORE_ID}),
+        # frontend-service varianty
+        ("https://www.rohlik.cz/services/frontend-service/v2/search",
+            {"query": HLEDANY_PRODUKT, "storeId": STORE_ID}),
+        ("https://www.rohlik.cz/services/frontend-service/v1/search",
+            {"query": HLEDANY_PRODUKT}),
+        ("https://www.rohlik.cz/services/frontend-service/v2/products",
+            {"productName": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
+        ("https://www.rohlik.cz/services/frontend-service/v2/products",
+            {"name": HLEDANY_PRODUKT, "storeId": STORE_ID, "limit": 10}),
     ]
 
-    for url in endpointy:
-        info(f"Zkousim: GET {url}")
+    for url, params in endpointy:
+        info(f"Zkousim: GET {url} params={params}")
         try:
-            response = session.get(url, timeout=10)
+            response = session.get(url, params=params, timeout=10)
             info(f"  Status: {response.status_code}")
-            if response.status_code in (401, 403):
-                info("  Odpoved 401/403 (co rika server):")
+            # Zobrazit telo i u 400/401/403 – server nam rekne co chybi
+            if response.status_code in (400, 401, 403):
+                info(f"  Odpoved {response.status_code} (co rika server):")
                 ukazat_response(response, zkratit=True)
             if response.status_code == 200:
-                ok(f"Vyhledavani funguje! Endpoint: {url}")
+                ok(f"Vyhledavani funguje! Endpoint: {url} params={params}")
                 ukazat_response(response, zkratit=True)
                 try:
                     data = response.json()
