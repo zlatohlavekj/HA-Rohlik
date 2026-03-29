@@ -222,6 +222,119 @@ def test_pridat_do_kosiku(session, produkt_id, cart_url):
 
 
 # ============================================================
+# TEST 5: Header autentizace (rhl-email + rhl-pass)
+# ============================================================
+
+def test_header_auth():
+    """
+    TEST 5: Autentizace pres rhl-email / rhl-pass hlavicky
+    -------------------------------------------------------
+    Rohlik.cz ma oficialni MCP server (mcp.rohlik.cz) ktery pouziva
+    tyto HTTP hlavicky misto session cookie. Pokud funguje i na beznych
+    REST endpointech, muze HA volat Rohlik primo pres rest_command
+    bez jakehokoli session managementu.
+    """
+    sekce("Header auth (rhl-email + rhl-pass)")
+    info("Testujeme autentizaci pres HTTP hlavicky (bez cookies)")
+    info("Zdroj: oficialny Rohlik MCP server na mcp.rohlik.cz")
+
+    # Nova session BEZ predchoziho loginu – pouze hlavicky
+    h_session = requests.Session()
+    h_session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://www.rohlik.cz",
+        "Referer": "https://www.rohlik.cz/",
+        # Oficialny auth mechanismus z rohlik.cz/en-CZ/stranka/rohlik-mcp-server
+        "rhl-email": EMAIL,
+        "rhl-pass": HESLO,
+    })
+
+    vysledky_header = {}
+
+    # --- Test A: Search bez loginu, pouze s hlavickami ---
+    info("\n  [A] Search s rhl-email/rhl-pass hlavickami:")
+    url_search = "https://www.rohlik.cz/services/frontend-service/search-metadata"
+    params = {"search": HLEDANY_PRODUKT, "offset": 0, "limit": 5, "companyId": 1, "canCorrect": "true"}
+    try:
+        r = h_session.get(url_search, params=params, timeout=10)
+        info(f"  Status: {r.status_code}")
+        if r.status_code == 200:
+            ok("Search funguje s header auth!")
+            data = r.json().get("data", {})
+            produkty = data.get("productList", [])
+            info(f"  Nalezeno: {len(produkty)} produktu")
+            if produkty:
+                info(f"  Prvni: {produkty[0].get('productName')} – {produkty[0].get('price', {}).get('full')} Kc")
+            vysledky_header["search"] = "OK"
+        else:
+            chyba(f"Search selhal: {r.status_code}")
+            ukazat_response(r, zkratit=True)
+            vysledky_header["search"] = f"FAILED ({r.status_code})"
+    except Exception as e:
+        chyba(f"Chyba: {e}")
+        vysledky_header["search"] = "ERROR"
+
+    # --- Test B: Kosik bez loginu, pouze s hlavickami ---
+    info("\n  [B] Kosik s rhl-email/rhl-pass hlavickami:")
+    url_cart = "https://www.rohlik.cz/services/frontend-service/v2/cart"
+    try:
+        r = h_session.get(url_cart, timeout=10)
+        info(f"  Status: {r.status_code}")
+        if r.status_code == 200:
+            ok("Kosik funguje s header auth!")
+            data = r.json().get("data", {})
+            info(f"  Cart total: {data.get('totalPrice')} Kc")
+            info(f"  Polozek: {len(data.get('items', {}))}")
+            vysledky_header["kosik"] = "OK"
+        else:
+            chyba(f"Kosik selhal: {r.status_code}")
+            ukazat_response(r, zkratit=True)
+            vysledky_header["kosik"] = f"FAILED ({r.status_code})"
+    except Exception as e:
+        chyba(f"Chyba: {e}")
+        vysledky_header["kosik"] = "ERROR"
+
+    # --- Test C: MCP endpoint primo ---
+    info("\n  [C] Oficialny MCP endpoint (mcp.rohlik.cz):")
+    url_mcp = "https://mcp.rohlik.cz/mcp"
+    # MCP pouziva JSON-RPC – zkusime jednoduchý initialize request
+    mcp_payload = {
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "ha-rohlik-test", "version": "1.0"}
+        },
+        "id": 1
+    }
+    try:
+        r = h_session.post(url_mcp, json=mcp_payload, timeout=10)
+        info(f"  Status: {r.status_code}")
+        if r.status_code == 200:
+            ok("MCP endpoint dostupny!")
+            ukazat_response(r, zkratit=True)
+            vysledky_header["mcp_endpoint"] = "OK"
+        else:
+            info(f"  MCP endpoint status: {r.status_code}")
+            ukazat_response(r, zkratit=True)
+            vysledky_header["mcp_endpoint"] = f"STATUS {r.status_code}"
+    except Exception as e:
+        chyba(f"Chyba: {e}")
+        vysledky_header["mcp_endpoint"] = "ERROR"
+
+    # Souhrn header auth testu
+    print("\n  --- Souhrn Header Auth ---")
+    for test, vysledek in vysledky_header.items():
+        emoji = "\u2705" if "OK" in vysledek else "\u274c"
+        print(f"  {emoji}  header_{test:25s} {vysledek}")
+
+    return vysledky_header
+
+
+# ============================================================
 # Hlavni program
 # ============================================================
 
@@ -259,6 +372,12 @@ def main():
 
     cart_url = test_kosik(session, token)
     vysledky["kosik"] = "OK" if cart_url else "FAILED"
+
+    # TEST 5: Header autentizace
+    header_vysledky = test_header_auth()
+    vysledky["header_auth_search"] = header_vysledky.get("search", "SKIPPED")
+    vysledky["header_auth_kosik"] = header_vysledky.get("kosik", "SKIPPED")
+    vysledky["mcp_endpoint"] = header_vysledky.get("mcp_endpoint", "SKIPPED")
 
     if PRIDAT_DO_KOSIKU and produkty:
         prvni_id = produkty[0].get("id") or produkty[0].get("productId")
